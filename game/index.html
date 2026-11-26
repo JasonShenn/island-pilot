@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Island Pilot — a bush-plane island hop</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0a1622;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #eaf6ff; }
+  #game-canvas { display: block; width: 100%; height: 100%; }
+  .hud { position: fixed; z-index: 5; pointer-events: none; text-shadow: 0 0 8px rgba(0, 40, 80, .9), 0 1px 2px rgba(0,0,0,.8); }
+  .panel { background: rgba(8, 20, 32, .72); border: 1px solid rgba(127, 212, 255, .45);
+    border-radius: 8px; padding: 8px 12px; box-shadow: 0 0 14px rgba(80, 180, 255, .25); }
+  .label { font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: #7fd4ff; }
+  .value { font-size: 26px; font-weight: 700; line-height: 1.05; color: #fff; }
+  .unit { font-size: 11px; color: #9fc6dd; font-weight: 400; }
+  #hud-left { top: 14px; left: 14px; display: flex; gap: 10px; }
+  #hud-right { top: 14px; right: 14px; width: 210px; }
+  #hud-right .row { display: flex; justify-content: space-between; align-items: baseline; margin: 2px 0; }
+  .bar { height: 9px; border-radius: 5px; background: rgba(255,255,255,.18); overflow: hidden; margin: 3px 0 6px; }
+  .bar > div { height: 100%; border-radius: 5px; background: linear-gradient(90deg, #37b6ff, #7df0c0); box-shadow: 0 0 8px rgba(80, 220, 180, .8); }
+  .bar > div.low { background: linear-gradient(90deg, #ff9a3c, #ff5252); box-shadow: 0 0 8px rgba(255, 90, 60, .8); }
+  #hud-compass { display: block; margin-top: 6px; border-radius: 4px; }
+  #hud-bottom { left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; gap: 10px; align-items: flex-end; }
+  #hud-mission { bottom: 14px; left: 14px; max-width: 330px; font-size: 13px; line-height: 1.5; }
+  #hud-mission .big { font-size: 16px; font-weight: 700; color: #ffc93c; }
+  #hud-toast { top: 150px; left: 50%; transform: translateX(-50%); font-size: 19px; font-weight: 700;
+    color: #ffe9a8; background: rgba(8, 20, 32, .78); border: 1px solid rgba(255, 201, 60, .55);
+    padding: 8px 18px; border-radius: 999px; opacity: 0; transition: opacity .25s; white-space: nowrap; }
+  #hud-toast.show { opacity: 1; }
+  #overlay { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    background: linear-gradient(180deg, rgba(6, 18, 30, .55), rgba(6, 18, 30, .82)); padding: 20px; }
+  #overlay.hidden { display: none; }
+  #overlay-title { font-size: 54px; letter-spacing: .12em; font-weight: 800; color: #fff;
+    text-shadow: 0 0 24px rgba(90, 190, 255, .8), 0 2px 0 rgba(0,0,0,.4); }
+  #overlay-body { margin-top: 14px; font-size: 16px; line-height: 1.7; max-width: 640px; color: #d5ecff; }
+  #overlay-body b { color: #ffc93c; }
+  #overlay-hint { margin-top: 18px; font-size: 14px; color: #9fc6dd; }
+  #overlay-start { margin-top: 22px; pointer-events: auto; cursor: pointer; font-size: 19px; font-weight: 700;
+    color: #08202f; background: linear-gradient(180deg, #ffd76a, #ffae2e); border: none; border-radius: 999px;
+    padding: 13px 42px; box-shadow: 0 0 26px rgba(255, 190, 60, .65); display: none; }
+  #overlay-start:hover { filter: brightness(1.08); }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
+</head>
+<body>
+<canvas id="game-canvas"></canvas>
+
+<div class="hud" id="hud-left">
+  <div class="panel"><div class="label">Airspeed</div><div class="value"><span id="hud-airspeed">0</span> <span class="unit">kt</span></div></div>
+  <div class="panel"><div class="label">Altitude</div><div class="value"><span id="hud-altitude">0</span> <span class="unit">ft</span></div><div class="label" id="hud-vspeed">+0 ft/min</div></div>
+  <div class="panel"><div class="label">Heading</div><div class="value" id="hud-heading">000°</div><canvas id="hud-compass" width="150" height="34"></canvas></div>
+</div>
+
+<div class="hud panel" id="hud-right">
+  <div class="row"><span class="label">Fuel</span><span id="hud-fuel-text">100%</span></div>
+  <div class="bar"><div id="hud-fuel-fill" style="width:100%"></div></div>
+  <div class="row"><span class="label">Throttle</span><span class="label" id="hud-wind">Wind 12 kt →</span></div>
+  <div class="bar"><div id="hud-throttle-fill" style="width:0%"></div></div>
+  <div class="row"><span class="label">Score</span><span class="value" style="font-size:20px" id="hud-score">0</span></div>
+  <div class="row"><span class="label">Time</span><span class="value" style="font-size:20px" id="hud-timer">00:00</span></div>
+</div>
+
+<div class="hud panel" id="hud-mission">
+  <div class="big" id="hud-ring">Ring 1/6 — 450 m ▲ ahead</div>
+  <div id="hud-stamps">Stamps: — land on Palm Cay, Turtle Bay, Volcano Rock</div>
+</div>
+
+<div class="hud" id="hud-bottom">
+  <canvas id="hud-attitude" width="120" height="120"></canvas>
+</div>
+
+<div class="hud" id="hud-toast"></div>
+
+<div id="overlay">
+  <div id="overlay-title">ISLAND PILOT</div>
+  <div id="overlay-body"></div>
+  <button id="overlay-start">Start Flying</button>
+  <div id="overlay-hint"></div>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
